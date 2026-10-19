@@ -8,7 +8,7 @@ import { IngredientModal } from '@/components/dashboard/IngredientModal';
 import { DeleteConfirmDialog } from '@/components/dashboard/DeleteConfirmDialog';
 import { TareScaleModal } from '@/components/dashboard/TareScaleModal';
 import { SupabaseConfigModal } from '@/components/dashboard/SupabaseConfigModal';
-import { Ingredient, IngredientInput, InventoryStats } from '@/types/ingredient';
+import { Ingredient, IngredientInput, InventoryStats, InventoryTab } from '@/types/ingredient';
 import { 
   getIngredients, 
   getInventoryStats, 
@@ -21,6 +21,7 @@ import {
 import { CheckCircle2, AlertCircle } from 'lucide-react';
 
 export default function StockDashboardPage() {
+  const [activeTab, setActiveTab] = useState<InventoryTab>('supplies');
   const [ingredients, setIngredients] = useState<Ingredient[]>([]);
   const [stats, setStats] = useState<InventoryStats>({
     totalItems: 0,
@@ -70,11 +71,12 @@ export default function StockDashboardPage() {
     try {
       const [ingredientsRes, statsRes, dbStatus] = await Promise.all([
         getIngredients({
+          tab: activeTab,
           search: searchQuery,
           category: selectedCategory,
           status: statusFilter,
         }),
-        getInventoryStats(),
+        getInventoryStats(activeTab),
         getDatabaseConnectionStatus(),
       ]);
 
@@ -90,7 +92,7 @@ export default function StockDashboardPage() {
       setLoading(false);
       setIsRefreshing(false);
     }
-  }, [searchQuery, selectedCategory, statusFilter]);
+  }, [activeTab, searchQuery, selectedCategory, statusFilter]);
 
   useEffect(() => {
     loadData(true);
@@ -105,9 +107,9 @@ export default function StockDashboardPage() {
   const handleSaveIngredient = async (formData: IngredientInput): Promise<boolean> => {
     try {
       if (selectedIngredient) {
-        const res = await updateIngredient(selectedIngredient.id, formData);
+        const res = await updateIngredient(selectedIngredient.id, formData, selectedIngredient.sourceTable);
         if (res.success) {
-          showToast(`อัปเดต "${formData.name}" เรียบร้อยแล้ว`);
+          showToast(`อัปเดต "${formData.name}" บน Supabase เรียบร้อยแล้ว`);
           loadData();
           return true;
         } else {
@@ -115,9 +117,9 @@ export default function StockDashboardPage() {
           return false;
         }
       } else {
-        const res = await createIngredient(formData);
+        const res = await createIngredient({ ...formData, sourceTable: activeTab });
         if (res.success) {
-          showToast(`เพิ่ม "${formData.name}" เข้าคลังสต็อกสำเร็จ`);
+          showToast(`เพิ่ม "${formData.name}" ลงในตาราง ${activeTab} สำเร็จ`);
           loadData();
           return true;
         } else {
@@ -135,26 +137,26 @@ export default function StockDashboardPage() {
   const handleConfirmDelete = async () => {
     if (!ingredientToDelete) return;
     try {
-      const res = await deleteIngredient(ingredientToDelete.id);
+      const res = await deleteIngredient(ingredientToDelete.id, ingredientToDelete.sourceTable);
       if (res.success) {
-        showToast(`ลบ "${ingredientToDelete.name}" ออกจากระบบแล้ว`);
+        showToast(`ลบ "${ingredientToDelete.name}" ออกจาก Supabase แล้ว`);
         setIsDeleteDialogOpen(false);
         setIngredientToDelete(null);
         loadData();
       } else {
-        showToast(res.error || 'ไม่สามารถลบวัตถุดิบได้', 'error');
+        showToast(res.error || 'ไม่สามารถลบรายการได้', 'error');
       }
     } catch (error) {
-      showToast('เกิดข้อผิดพลาดในการลบวัตถุดิบ', 'error');
+      showToast('เกิดข้อผิดพลาดในการลบรายการ', 'error');
     }
   };
 
   // Action: Quick Adjust Stock
   const handleQuickAdjust = async (ingredient: Ingredient, amount: number, mode: 'add' | 'subtract') => {
     try {
-      const res = await quickAdjustStock(ingredient.id, amount, mode);
-      if (res.success && res.data) {
-        showToast(`ปรับสต็อก "${ingredient.name}" เป็น ${res.data.currentStock} ${ingredient.unit}`);
+      const res = await quickAdjustStock(ingredient.id, amount, mode, ingredient.sourceTable);
+      if (res.success && res.newStock !== undefined) {
+        showToast(`ปรับสต็อก "${ingredient.name}" เป็น ${res.newStock} ${ingredient.unit}`);
         loadData();
       }
     } catch (error) {
@@ -162,13 +164,13 @@ export default function StockDashboardPage() {
     }
   };
 
-  // Action: Apply Stock from Scale Tare Calculation
+  // Action: Apply Stock from Scale Tare Calculation (Preserves core purpose)
   const handleApplyTareStock = async (id: string, netStock: number): Promise<boolean> => {
     try {
-      const res = await updateIngredient(id, { currentStock: netStock });
+      const item = ingredients.find((i) => i.id === id);
+      const res = await updateIngredient(id, { currentStock: netStock }, item?.sourceTable || activeTab);
       if (res.success) {
-        const item = ingredients.find((i) => i.id === id);
-        showToast(`หักน้ำหนักภาชนะสำเร็จ! อัปเดตสต็อกสุทธิเป็น ${netStock} ${item?.unit || 'g'}`);
+        showToast(`หักน้ำหนักภาชนะสำเร็จ! อัปเดตสต็อกสุทธิเป็น ${netStock} ${item?.unit || 'ชิ้น'}`);
         loadData();
         return true;
       } else {
@@ -206,6 +208,11 @@ export default function StockDashboardPage() {
 
       {/* Header */}
       <Header
+        activeTab={activeTab}
+        onTabChange={(tab) => {
+          setActiveTab(tab);
+          setSelectedCategory('all');
+        }}
         onAddNew={() => {
           setSelectedIngredient(null);
           setIsModalOpen(true);
@@ -262,6 +269,7 @@ export default function StockDashboardPage() {
       {/* CRUD Modal (Add / Edit) */}
       <IngredientModal
         isOpen={isModalOpen}
+        activeTab={activeTab}
         onClose={() => {
           setIsModalOpen(false);
           setSelectedIngredient(null);

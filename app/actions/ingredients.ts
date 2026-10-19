@@ -1,37 +1,38 @@
 'use server';
 
 import { supabase, isSupabaseConfigured } from '@/lib/supabase';
-import prisma from '@/lib/prisma';
-import { Ingredient, IngredientInput, InventoryStats } from '@/types/ingredient';
+import { Ingredient, IngredientInput, InventoryStats, InventoryTab } from '@/types/ingredient';
 import { revalidatePath } from 'next/cache';
 
 /**
- * ตรวจสอบว่าระบบกำลังเชื่อมต่อกับ Supabase หรือ Local Database
+ * ตรวจสอบว่าระบบกำลังเชื่อมต่อกับ Supabase หรือไม่
  */
 export async function getDatabaseConnectionStatus(): Promise<{
-  provider: 'supabase' | 'sqlite_fallback';
+  provider: 'supabase' | 'local';
   isConfigured: boolean;
   supabaseUrl?: string;
 }> {
   return {
-    provider: isSupabaseConfigured ? 'supabase' : 'sqlite_fallback',
+    provider: isSupabaseConfigured ? 'supabase' : 'local',
     isConfigured: isSupabaseConfigured,
     supabaseUrl: process.env.NEXT_PUBLIC_SUPABASE_URL || '',
   };
 }
 
 /**
- * ดึงรายการวัตถุดิบทั้งหมด (Read)
+ * ดึงรายการพัสดุและสต็อกจาก Supabase (รองรับทั้ง supplies และ stock)
  */
 export async function getIngredients(params?: {
+  tab?: InventoryTab;
   search?: string;
   category?: string;
   status?: 'all' | 'low' | 'out' | 'in_stock';
-  sortBy?: 'name' | 'currentStock' | 'tareWeight' | 'updatedAt';
+  sortBy?: 'name' | 'currentStock' | 'tareWeight';
   sortOrder?: 'asc' | 'desc';
 }): Promise<{ success: boolean; data: Ingredient[]; provider: string; error?: string }> {
   try {
     const {
+      tab = 'supplies',
       search,
       category,
       status = 'all',
@@ -39,87 +40,84 @@ export async function getIngredients(params?: {
       sortOrder = 'asc',
     } = params || {};
 
-    // 1. ถ้ามี Supabase Config ให้ดึงจาก Supabase
-    if (isSupabaseConfigured) {
-      let query = supabase
-        .from('ingredients')
-        .select('*')
-        .order(sortBy, { ascending: sortOrder === 'asc' });
+    if (!isSupabaseConfigured) {
+      return { success: false, data: [], provider: 'none', error: 'ยังไม่ได้ตั้งค่า Supabase' };
+    }
+
+    let items: Ingredient[] = [];
+
+    if (tab === 'supplies') {
+      // ดึงจากตาราง supplies
+      let query = supabase.from('supplies').select('*');
 
       if (category && category !== 'all') {
         query = query.eq('category', category);
       }
-
       if (search && search.trim() !== '') {
-        query = query.or(`name.ilike.%${search.trim()}%,supplier.ilike.%${search.trim()}%,notes.ilike.%${search.trim()}%`);
+        query = query.ilike('item_name', `%${search.trim()}%`);
       }
 
       const { data, error } = await query;
+      if (error) throw error;
 
-      if (error) {
-        if (error.code === 'PGRST205') {
-          console.warn('⚠️ Supabase table "ingredients" does not exist yet. Please run supabase/schema.sql in Supabase SQL Editor.');
-          // ดึงจาก local fallback ชั่วคราวจนกว่าผู้ใช้จะรัน schema.sql ใน Supabase
-          const localItems = await prisma.ingredient.findMany({
-            where: category && category !== 'all' ? { category } : {},
-            orderBy: { [sortBy]: sortOrder },
-          });
-          return { 
-            success: true, 
-            data: localItems, 
-            provider: 'supabase_pending_schema',
-            error: 'เชื่อมต่อ Supabase สำเร็จแล้ว แต่ยังไม่พบตาราง ingredients กรุณานำ supabase/schema.sql ไปรันใน SQL Editor' 
-          };
-        }
-        console.error('Supabase query error:', error);
-        throw error;
+      items = (data || []).map((row) => ({
+        id: String(row.id),
+        name: row.item_name || '',
+        unit: row.unit || 'ชิ้น',
+        tareWeight: 0, // จุดประสงค์เดิม: ระบบรองรับ Tare Weight (รอเพิ่ม column ใน DB ภายหลัง)
+        currentStock: Number(row.stock_quantity) || 0,
+        minStockLevel: 5, // จุดเตือนเบื้องต้น
+        category: row.category || 'Supply',
+        costPerUnit: Number(row.cost_per_unit) || Number(row.purchase_price) || 0,
+        price: Number(row.purchase_price) || 0,
+        packageQuantity: Number(row.package_quantity) || 1,
+        sourceTable: 'supplies',
+        createdAt: row.created_at,
+        notes: row.package_quantity ? `บรรจุแพ็คละ ${row.package_quantity} ${row.unit}` : null,
+      }));
+    } else {
+      // ดึงจากตาราง stock
+      let query = supabase.from('stock').select('*');
+
+      if (category && category !== 'all') {
+        query = query.eq('category', category);
+      }
+      if (search && search.trim() !== '') {
+        query = query.ilike('item_name', `%${search.trim()}%`);
       }
 
-      let items = (data || []).map((item) => ({
-        id: item.id,
-        name: item.name,
-        unit: item.unit,
-        tareWeight: Number(item.tareWeight) || 0,
-        currentStock: Number(item.currentStock) || 0,
-        minStockLevel: Number(item.minStockLevel) || 0,
-        category: item.category,
-        costPerUnit: Number(item.costPerUnit) || 0,
-        supplier: item.supplier,
-        notes: item.notes,
-        createdAt: item.createdAt,
-        updatedAt: item.updatedAt,
-      })) as Ingredient[];
+      const { data, error } = await query;
+      if (error) throw error;
 
-      // กรองสถานะสต็อก
-      if (status === 'out') {
-        items = items.filter((item) => item.currentStock <= 0);
-      } else if (status === 'low') {
-        items = items.filter((item) => item.currentStock > 0 && item.currentStock <= item.minStockLevel);
-      } else if (status === 'in_stock') {
-        items = items.filter((item) => item.currentStock > item.minStockLevel);
+      items = (data || []).map((row) => ({
+        id: String(row.id),
+        name: row.item_name || '',
+        unit: row.unit || 'Cup',
+        tareWeight: 0, // จุดประสงค์เดิม: ระบบรองรับ Tare Weight (รอเพิ่ม column ใน DB ภายหลัง)
+        currentStock: Number(row.stock_quantity) || 0,
+        minStockLevel: 10,
+        category: row.category || 'Coffee',
+        costPerUnit: Number(row.avg_cost) || 0,
+        price: Number(row.price) || 0,
+        barcode: row.barcode && row.barcode !== '-' ? row.barcode : null,
+        sourceTable: 'stock',
+        createdAt: row.created_at,
+        notes: row.profit_margin ? `Margin: ${row.profit_margin}` : null,
+      }));
+    }
+
+    // จัดเรียง
+    items.sort((a, b) => {
+      if (sortBy === 'name') {
+        return sortOrder === 'asc' ? a.name.localeCompare(b.name, 'th') : b.name.localeCompare(a.name, 'th');
       }
-
-      return { success: true, data: items, provider: 'supabase' };
-    }
-
-    // 2. ถ้ายังไม่ได้ใส่ Supabase Config ให้ใช้ Local Prisma SQLite Fallback
-    const where: any = {};
-    if (search && search.trim() !== '') {
-      where.OR = [
-        { name: { contains: search.trim() } },
-        { notes: { contains: search.trim() } },
-        { supplier: { contains: search.trim() } },
-      ];
-    }
-    if (category && category !== 'all') {
-      where.category = category;
-    }
-
-    let items = await prisma.ingredient.findMany({
-      where,
-      orderBy: { [sortBy]: sortOrder },
+      if (sortBy === 'currentStock') {
+        return sortOrder === 'asc' ? a.currentStock - b.currentStock : b.currentStock - a.currentStock;
+      }
+      return 0;
     });
 
+    // กรองสถานะสต็อก
     if (status === 'out') {
       items = items.filter((item) => item.currentStock <= 0);
     } else if (status === 'low') {
@@ -128,57 +126,49 @@ export async function getIngredients(params?: {
       items = items.filter((item) => item.currentStock > item.minStockLevel);
     }
 
-    return { success: true, data: items, provider: 'sqlite_fallback' };
+    return { success: true, data: items, provider: 'supabase' };
   } catch (error: any) {
-    console.error('Failed to fetch ingredients:', error);
-    return { success: false, data: [], provider: 'unknown', error: error.message || 'ไม่สามารถดึงข้อมูลได้' };
+    console.error('Failed to fetch ingredients from Supabase:', error);
+    return { success: false, data: [], provider: 'supabase', error: error.message || 'ไม่สามารถดึงข้อมูลได้' };
   }
 }
 
 /**
- * ดึงข้อมูลสรุปภาพรวมสต็อก (Summary Cards Stats)
+ * ดึงข้อมูลสรุปภาพรวมสต็อก
  */
-export async function getInventoryStats(): Promise<InventoryStats> {
+export async function getInventoryStats(tab: InventoryTab = 'supplies'): Promise<InventoryStats> {
   try {
-    let allItems: any[] = [];
-
-    if (isSupabaseConfigured) {
-      const { data, error } = await supabase.from('ingredients').select('*');
-      if (error) {
-        if (error.code === 'PGRST205') {
-          allItems = await prisma.ingredient.findMany();
-        } else {
-          throw error;
-        }
-      } else {
-        allItems = (data || []).map((item) => ({
-          ...item,
-          currentStock: Number(item.currentStock) || 0,
-          minStockLevel: Number(item.minStockLevel) || 0,
-          costPerUnit: Number(item.costPerUnit) || 0,
-        }));
-      }
-    } else {
-      allItems = await prisma.ingredient.findMany();
+    if (!isSupabaseConfigured) {
+      return { totalItems: 0, lowStockCount: 0, outOfStockCount: 0, categoriesCount: 0, totalEstimatedValue: 0 };
     }
 
-    const totalItems = allItems.length;
+    const tableName = tab === 'supplies' ? 'supplies' : 'stock';
+    const { data, error } = await supabase.from(tableName).select('*');
+    if (error || !data) return { totalItems: 0, lowStockCount: 0, outOfStockCount: 0, categoriesCount: 0, totalEstimatedValue: 0 };
+
+    const totalItems = data.length;
     let lowStockCount = 0;
     let outOfStockCount = 0;
     let totalEstimatedValue = 0;
     const uniqueCategories = new Set<string>();
 
-    for (const item of allItems) {
+    for (const item of data) {
       if (item.category) uniqueCategories.add(item.category);
 
-      if (item.currentStock <= 0) {
+      const qty = Number(item.stock_quantity) || 0;
+      const minLevel = tab === 'supplies' ? 5 : 10;
+      const cost = tab === 'supplies' ? (Number(item.cost_per_unit) || Number(item.purchase_price) || 0) : (Number(item.avg_cost) || 0);
+
+      if (qty <= 0) {
         outOfStockCount++;
-      } else if (item.currentStock <= item.minStockLevel) {
+      } else if (qty <= minLevel) {
         lowStockCount++;
       }
 
-      if (item.costPerUnit && item.currentStock > 0) {
-        totalEstimatedValue += item.costPerUnit * item.currentStock;
+      if (cost > 0 && qty > 0) {
+        // จำกัดไม่ให้จำนวนหลอกเช่น 999999 ดึงมูลค่าเวอร์
+        const effectiveQty = qty > 10000 ? 100 : qty;
+        totalEstimatedValue += cost * effectiveQty;
       }
     }
 
@@ -191,137 +181,123 @@ export async function getInventoryStats(): Promise<InventoryStats> {
     };
   } catch (error) {
     console.error('Failed to get inventory stats:', error);
-    return {
-      totalItems: 0,
-      lowStockCount: 0,
-      outOfStockCount: 0,
-      categoriesCount: 0,
-      totalEstimatedValue: 0,
-    };
+    return { totalItems: 0, lowStockCount: 0, outOfStockCount: 0, categoriesCount: 0, totalEstimatedValue: 0 };
   }
 }
 
 /**
- * สร้างวัตถุดิบใหม่ (Create)
+ * สร้างรายการใหม่ลงใน Supabase
  */
 export async function createIngredient(
   data: IngredientInput
 ): Promise<{ success: boolean; data?: Ingredient; error?: string }> {
   try {
     if (!data.name || data.name.trim() === '') {
-      return { success: false, error: 'กรุณากรอกชื่อวัตถุดิบ' };
-    }
-    if (!data.unit || data.unit.trim() === '') {
-      return { success: false, error: 'กรุณาระบุหน่วยนับ' };
+      return { success: false, error: 'กรุณากรอกชื่อวัตถุดิบ/สินค้า' };
     }
 
-    const payload = {
-      name: data.name.trim(),
-      unit: data.unit.trim(),
-      tareWeight: Number(data.tareWeight) || 0,
-      currentStock: Number(data.currentStock) || 0,
-      minStockLevel: Number(data.minStockLevel) || 0,
-      category: data.category?.trim() || null,
-      costPerUnit: Number(data.costPerUnit) || 0,
-      supplier: data.supplier?.trim() || null,
-      notes: data.notes?.trim() || null,
-      updatedAt: new Date().toISOString(),
-    };
+    const targetTable = data.sourceTable || 'supplies';
 
-    if (isSupabaseConfigured) {
-      const { data: created, error } = await supabase
-        .from('ingredients')
-        .insert([payload])
-        .select()
-        .single();
+    if (targetTable === 'supplies') {
+      const payload = {
+        item_name: data.name.trim(),
+        category: data.category?.trim() || 'Supply',
+        unit: data.unit || 'ชิ้น',
+        purchase_price: Number(data.costPerUnit) || 0,
+        cost_per_unit: Number(data.costPerUnit) || 0,
+        stock_quantity: Number(data.currentStock) || 0,
+        package_quantity: 1,
+      };
 
+      const { data: created, error } = await supabase.from('supplies').insert([payload]).select().single();
       if (error) throw error;
       revalidatePath('/');
-      return { success: true, data: created };
+      return { success: true };
     } else {
-      const created = await prisma.ingredient.create({
-        data: payload,
-      });
+      const payload = {
+        item_name: data.name.trim(),
+        category: data.category?.trim() || 'Coffee',
+        unit: data.unit || 'Cup',
+        price: Number(data.price) || 0,
+        avg_cost: Number(data.costPerUnit) || 0,
+        stock_quantity: Number(data.currentStock) || 0,
+        barcode: data.barcode?.trim() || '-',
+        sale_type: 'ราคาต่อหน่วย',
+      };
+
+      const { data: created, error } = await supabase.from('stock').insert([payload]).select().single();
+      if (error) throw error;
       revalidatePath('/');
-      return { success: true, data: created };
+      return { success: true };
     }
   } catch (error: any) {
     console.error('Failed to create ingredient:', error);
-    return { success: false, error: error.message || 'เกิดข้อผิดพลาดในการบันทึกข้อมูล' };
+    return { success: false, error: error.message || 'เกิดข้อผิดพลาดในการบันทึกข้อมูลลง Supabase' };
   }
 }
 
 /**
- * อัปเดตข้อมูลวัตถุดิบเดิม (Update)
+ * อัปเดตข้อมูลใน Supabase
  */
 export async function updateIngredient(
   id: string,
-  data: Partial<IngredientInput>
-): Promise<{ success: boolean; data?: Ingredient; error?: string }> {
+  data: Partial<IngredientInput>,
+  sourceTable: 'supplies' | 'stock' = 'supplies'
+): Promise<{ success: boolean; error?: string }> {
   try {
-    const updateData: any = {
-      updatedAt: new Date().toISOString(),
-    };
+    const numId = isNaN(Number(id)) ? id : Number(id);
 
-    if (data.name !== undefined) updateData.name = data.name.trim();
-    if (data.unit !== undefined) updateData.unit = data.unit.trim();
-    if (data.tareWeight !== undefined) updateData.tareWeight = Number(data.tareWeight) || 0;
-    if (data.currentStock !== undefined) updateData.currentStock = Number(data.currentStock) || 0;
-    if (data.minStockLevel !== undefined) updateData.minStockLevel = Number(data.minStockLevel) || 0;
-    if (data.category !== undefined) updateData.category = data.category?.trim() || null;
-    if (data.costPerUnit !== undefined) updateData.costPerUnit = Number(data.costPerUnit) || 0;
-    if (data.supplier !== undefined) updateData.supplier = data.supplier?.trim() || null;
-    if (data.notes !== undefined) updateData.notes = data.notes?.trim() || null;
+    if (sourceTable === 'supplies') {
+      const updatePayload: any = {};
+      if (data.name !== undefined) updatePayload.item_name = data.name.trim();
+      if (data.category !== undefined) updatePayload.category = data.category.trim();
+      if (data.unit !== undefined) updatePayload.unit = data.unit.trim();
+      if (data.costPerUnit !== undefined) {
+        updatePayload.cost_per_unit = Number(data.costPerUnit);
+        updatePayload.purchase_price = Number(data.costPerUnit);
+      }
+      if (data.currentStock !== undefined) updatePayload.stock_quantity = Number(data.currentStock);
 
-    if (isSupabaseConfigured) {
-      const { data: updated, error } = await supabase
-        .from('ingredients')
-        .update(updateData)
-        .eq('id', id)
-        .select()
-        .single();
-
+      const { error } = await supabase.from('supplies').update(updatePayload).eq('id', numId);
       if (error) throw error;
-      revalidatePath('/');
-      return { success: true, data: updated };
     } else {
-      const updated = await prisma.ingredient.update({
-        where: { id },
-        data: updateData,
-      });
-      revalidatePath('/');
-      return { success: true, data: updated };
+      const updatePayload: any = {};
+      if (data.name !== undefined) updatePayload.item_name = data.name.trim();
+      if (data.category !== undefined) updatePayload.category = data.category.trim();
+      if (data.unit !== undefined) updatePayload.unit = data.unit.trim();
+      if (data.price !== undefined) updatePayload.price = Number(data.price);
+      if (data.costPerUnit !== undefined) updatePayload.avg_cost = Number(data.costPerUnit);
+      if (data.currentStock !== undefined) updatePayload.stock_quantity = Number(data.currentStock);
+      if (data.barcode !== undefined) updatePayload.barcode = data.barcode.trim();
+
+      const { error } = await supabase.from('stock').update(updatePayload).eq('id', numId);
+      if (error) throw error;
     }
+
+    revalidatePath('/');
+    return { success: true };
   } catch (error: any) {
-    console.error('Failed to update ingredient:', error);
+    console.error('Failed to update ingredient in Supabase:', error);
     return { success: false, error: error.message || 'เกิดข้อผิดพลาดในการแก้ไขข้อมูล' };
   }
 }
 
 /**
- * ลบวัตถุดิบ (Delete)
+ * ลบรายการออกจาก Supabase
  */
-export async function deleteIngredient(id: string): Promise<{ success: boolean; error?: string }> {
+export async function deleteIngredient(
+  id: string,
+  sourceTable: 'supplies' | 'stock' = 'supplies'
+): Promise<{ success: boolean; error?: string }> {
   try {
-    if (isSupabaseConfigured) {
-      const { error } = await supabase
-        .from('ingredients')
-        .delete()
-        .eq('id', id);
-
-      if (error) throw error;
-      revalidatePath('/');
-      return { success: true };
-    } else {
-      await prisma.ingredient.delete({
-        where: { id },
-      });
-      revalidatePath('/');
-      return { success: true };
-    }
+    const numId = isNaN(Number(id)) ? id : Number(id);
+    const { error } = await supabase.from(sourceTable).delete().eq('id', numId);
+    if (error) throw error;
+    revalidatePath('/');
+    return { success: true };
   } catch (error: any) {
-    console.error('Failed to delete ingredient:', error);
-    return { success: false, error: error.message || 'เกิดข้อผิดพลาดในการลบวัตถุดิบ' };
+    console.error('Failed to delete ingredient from Supabase:', error);
+    return { success: false, error: error.message || 'เกิดข้อผิดพลาดในการลบข้อมูล' };
   }
 }
 
@@ -331,69 +307,36 @@ export async function deleteIngredient(id: string): Promise<{ success: boolean; 
 export async function quickAdjustStock(
   id: string,
   amount: number,
-  mode: 'set' | 'add' | 'subtract'
-): Promise<{ success: boolean; data?: Ingredient; error?: string }> {
+  mode: 'set' | 'add' | 'subtract',
+  sourceTable: 'supplies' | 'stock' = 'supplies'
+): Promise<{ success: boolean; newStock?: number; error?: string }> {
   try {
-    let currentStock = 0;
+    const numId = isNaN(Number(id)) ? id : Number(id);
+    const { data: item, error: fetchErr } = await supabase
+      .from(sourceTable)
+      .select('stock_quantity')
+      .eq('id', numId)
+      .single();
 
-    if (isSupabaseConfigured) {
-      const { data: item, error: fetchErr } = await supabase
-        .from('ingredients')
-        .select('currentStock')
-        .eq('id', id)
-        .single();
-
-      if (fetchErr || !item) throw new Error('ไม่พบวัตถุดิบ');
-      currentStock = Number(item.currentStock) || 0;
-    } else {
-      const existing = await prisma.ingredient.findUnique({ where: { id } });
-      if (!existing) throw new Error('ไม่พบวัตถุดิบ');
-      currentStock = existing.currentStock;
-    }
+    if (fetchErr || !item) throw new Error('ไม่พบรายการในฐานข้อมูล');
+    const currentStock = Number(item.stock_quantity) || 0;
 
     let newStock = currentStock;
     if (mode === 'set') newStock = Math.max(0, amount);
-    else if (mode === 'add') newStock = Math.max(0, currentStock + amount);
+    else if (mode === 'add') newStock = currentStock + amount;
     else if (mode === 'subtract') newStock = Math.max(0, currentStock - amount);
 
-    return await updateIngredient(id, { currentStock: newStock });
+    const { error: updateErr } = await supabase
+      .from(sourceTable)
+      .update({ stock_quantity: newStock })
+      .eq('id', numId);
+
+    if (updateErr) throw updateErr;
+
+    revalidatePath('/');
+    return { success: true, newStock };
   } catch (error: any) {
     console.error('Failed to adjust stock:', error);
     return { success: false, error: error.message || 'เกิดข้อผิดพลาดในการปรับยอดสต็อก' };
-  }
-}
-
-/**
- * คำนวณสต็อกสุทธิจากการชั่งน้ำหนักรวม (Gross Weight Tare Deduction)
- */
-export async function adjustStockByGrossWeight(
-  id: string,
-  grossWeight: number
-): Promise<{ success: boolean; data?: Ingredient; netWeight?: number; error?: string }> {
-  try {
-    let tareWeight = 0;
-
-    if (isSupabaseConfigured) {
-      const { data: item, error: fetchErr } = await supabase
-        .from('ingredients')
-        .select('tareWeight')
-        .eq('id', id)
-        .single();
-
-      if (fetchErr || !item) throw new Error('ไม่พบวัตถุดิบ');
-      tareWeight = Number(item.tareWeight) || 0;
-    } else {
-      const existing = await prisma.ingredient.findUnique({ where: { id } });
-      if (!existing) throw new Error('ไม่พบวัตถุดิบ');
-      tareWeight = existing.tareWeight;
-    }
-
-    const netWeight = Math.max(0, Number(grossWeight) - tareWeight);
-    const updateRes = await updateIngredient(id, { currentStock: netWeight });
-
-    return { ...updateRes, netWeight };
-  } catch (error: any) {
-    console.error('Failed to adjust stock by gross weight:', error);
-    return { success: false, error: error.message || 'เกิดข้อผิดพลาดในการคำนวณน้ำหนัก' };
   }
 }

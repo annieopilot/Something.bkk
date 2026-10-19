@@ -2,7 +2,7 @@
 
 import React, { useState, useEffect } from 'react';
 import { X, Scale, Save, AlertCircle } from 'lucide-react';
-import { Ingredient, IngredientInput, COMMON_CATEGORIES, COMMON_UNITS } from '@/types/ingredient';
+import { Ingredient, IngredientInput, InventoryTab, COMMON_CATEGORIES, COMMON_UNITS } from '@/types/ingredient';
 
 interface IngredientModalProps {
   isOpen: boolean;
@@ -10,6 +10,7 @@ interface IngredientModalProps {
   onSubmit: (data: IngredientInput) => Promise<boolean>;
   initialData?: Ingredient | null;
   loading: boolean;
+  activeTab?: InventoryTab;
 }
 
 export function IngredientModal({
@@ -18,19 +19,23 @@ export function IngredientModal({
   onSubmit,
   initialData,
   loading,
+  activeTab = 'supplies',
 }: IngredientModalProps) {
   const isEditMode = Boolean(initialData);
 
   const [formData, setFormData] = useState<IngredientInput>({
     name: '',
-    category: 'เมล็ดกาแฟ',
-    unit: 'g',
+    category: activeTab === 'supplies' ? 'Packaging' : 'Coffee',
+    unit: activeTab === 'supplies' ? 'ใบ' : 'Cup',
     currentStock: 0,
     tareWeight: 0,
-    minStockLevel: 0,
+    minStockLevel: activeTab === 'supplies' ? 5 : 10,
     costPerUnit: 0,
+    price: 0,
+    barcode: '',
     supplier: '',
     notes: '',
+    sourceTable: activeTab,
   });
 
   const [errorMessage, setErrorMessage] = useState<string>('');
@@ -39,30 +44,36 @@ export function IngredientModal({
     if (initialData) {
       setFormData({
         name: initialData.name,
-        category: initialData.category || 'เมล็ดกาแฟ',
+        category: initialData.category || (activeTab === 'supplies' ? 'Packaging' : 'Coffee'),
         unit: initialData.unit,
         currentStock: initialData.currentStock,
-        tareWeight: initialData.tareWeight,
-        minStockLevel: initialData.minStockLevel,
+        tareWeight: initialData.tareWeight || 0,
+        minStockLevel: initialData.minStockLevel || 5,
         costPerUnit: initialData.costPerUnit || 0,
+        price: initialData.price || 0,
+        barcode: initialData.barcode || '',
         supplier: initialData.supplier || '',
         notes: initialData.notes || '',
+        sourceTable: initialData.sourceTable || activeTab,
       });
     } else {
       setFormData({
         name: '',
-        category: 'เมล็ดกาแฟ',
-        unit: 'g',
-        currentStock: 1000,
-        tareWeight: 15,
-        minStockLevel: 500,
+        category: activeTab === 'supplies' ? 'Packaging' : 'Coffee',
+        unit: activeTab === 'supplies' ? 'ใบ' : 'Cup',
+        currentStock: 10,
+        tareWeight: 0,
+        minStockLevel: activeTab === 'supplies' ? 5 : 10,
         costPerUnit: 0,
+        price: 0,
+        barcode: '',
         supplier: '',
         notes: '',
+        sourceTable: activeTab,
       });
     }
     setErrorMessage('');
-  }, [initialData, isOpen]);
+  }, [initialData, isOpen, activeTab]);
 
   if (!isOpen) return null;
 
@@ -263,7 +274,7 @@ export function IngredientModal({
 
             </div>
 
-            {/* Cost & Supplier */}
+            {/* Cost, Supplier & Barcode */}
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div>
                 <label className="block text-xs font-semibold text-slate-700 mb-1.5">
@@ -297,6 +308,20 @@ export function IngredientModal({
                   className="w-full h-12 px-3.5 rounded-lg border border-slate-300 bg-white text-sm text-[#1A1A1A] focus:outline-none focus:ring-2 focus:ring-[#8B5A2B] focus:border-transparent"
                 />
               </div>
+            </div>
+
+            {/* Barcode / SKU */}
+            <div>
+              <label className="block text-xs font-semibold text-slate-700 mb-1.5">
+                บาร์โค้ดสินค้า / SKU (ถ้ามี)
+              </label>
+              <input
+                type="text"
+                placeholder="เช่น 885000100001 สำหรับสแกนบาร์โค้ดหน้าร้าน POS"
+                value={formData.barcode || ''}
+                onChange={(e) => setFormData({ ...formData, barcode: e.target.value })}
+                className="w-full h-12 px-3.5 rounded-lg border border-slate-300 bg-white text-sm font-mono text-[#1A1A1A] focus:outline-none focus:ring-2 focus:ring-[#8B5A2B] focus:border-transparent"
+              />
             </div>
 
             {/* Notes */}

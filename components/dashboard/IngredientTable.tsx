@@ -244,8 +244,15 @@ export function IngredientTable({
                   >
                     {/* Item Name & Details */}
                     <td className="py-3 px-4 sm:px-6">
-                      <div className="font-semibold text-[#1A1A1A] leading-tight">
-                        {item.name}
+                      <div className="flex items-center space-x-2">
+                        <span className="font-semibold text-[#1A1A1A] leading-tight">
+                          {item.name}
+                        </span>
+                        {item.barcode && (
+                          <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-mono bg-slate-100 text-slate-600 border border-slate-200" title={`บาร์โค้ด: ${item.barcode}`}>
+                            #{item.barcode}
+                          </span>
+                        )}
                       </div>
                       <div className="flex items-center space-x-2 text-xs text-slate-500 mt-0.5">
                         {item.supplier && (
@@ -309,7 +316,14 @@ export function IngredientTable({
                           <span className="text-[10px] opacity-75">ภาชนะ</span>
                         </div>
                       ) : (
-                        <span className="text-xs text-slate-400">- ไม่ระบุ -</span>
+                        <button
+                          onClick={() => onOpenScaleModal(item)}
+                          className="inline-flex items-center space-x-1 px-2 py-0.5 rounded text-[11px] font-medium text-slate-400 hover:text-[#1565C0] hover:bg-[#1565C0]/5 transition-colors"
+                          title="กดเพื่อชั่งน้ำหนักและตัดน้ำหนักภาชนะ"
+                        >
+                          <Scale className="w-3 h-3" />
+                          <span>รองรับการตัดภาชนะ</span>
+                        </button>
                       )}
                     </td>
 
@@ -420,10 +434,17 @@ export function IngredientTable({
                   )}
                 </div>
 
-                {/* Name */}
-                <h4 className="font-bold text-[#1A1A1A] text-base leading-snug line-clamp-1">
-                  {item.name}
-                </h4>
+                {/* Name & Barcode */}
+                <div className="flex items-center justify-between gap-1">
+                  <h4 className="font-bold text-[#1A1A1A] text-base leading-snug line-clamp-1">
+                    {item.name}
+                  </h4>
+                  {item.barcode && (
+                    <span className="shrink-0 text-[10px] font-mono px-1.5 py-0.5 rounded bg-slate-100 text-slate-600 border border-slate-200">
+                      #{item.barcode}
+                    </span>
+                  )}
+                </div>
 
                 {/* Stock Details */}
                 <div className="mt-3 p-3 rounded-lg bg-[#F8F9FA] border border-slate-100 flex items-center justify-between">

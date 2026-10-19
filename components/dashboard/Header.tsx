@@ -3,6 +3,8 @@
 import React, { useState, useEffect } from 'react';
 import { Coffee, Plus, Scale, RefreshCw, Layers, ShoppingBag, BarChart3, AlertCircle, Database } from 'lucide-react';
 
+import { InventoryTab } from '@/types/ingredient';
+
 interface HeaderProps {
   onAddNew: () => void;
   onOpenScaleModal: () => void;
@@ -11,6 +13,8 @@ interface HeaderProps {
   totalLowStock: number;
   isSupabaseConnected: boolean;
   onOpenSupabaseConfig: () => void;
+  activeTab: InventoryTab;
+  onTabChange: (tab: InventoryTab) => void;
 }
 
 export function Header({
@@ -21,6 +25,8 @@ export function Header({
   totalLowStock,
   isSupabaseConnected,
   onOpenSupabaseConfig,
+  activeTab,
+  onTabChange,
 }: HeaderProps) {
   const [currentTime, setCurrentTime] = useState<string>('');
 
@@ -62,11 +68,11 @@ export function Header({
                   BREW & CO. POS
                 </span>
                 <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-semibold bg-[#8B5A2B]/10 text-[#8B5A2B]">
-                  Stock Module v1.0
+                  Supabase Live DB
                 </span>
               </div>
               <p className="text-xs text-slate-500 font-medium">
-                ระบบบริหารสต็อกวัตถุดิบ & น้ำหนักภาชนะ (Tare Weight System)
+                ระบบจัดการสต็อก & พัสดุร้านกาแฟ พร้อมฟังก์ชันชั่งตัดภาชนะ (Tare Weight)
               </p>
             </div>
           </div>
@@ -85,7 +91,7 @@ export function Header({
               }`}
             >
               <Database className={`w-3.5 h-3.5 ${isSupabaseConnected ? 'text-emerald-600' : 'text-slate-500'}`} />
-              <span>{isSupabaseConnected ? 'Supabase Cloud DB' : 'เชื่อมต่อ Supabase'}</span>
+              <span>{isSupabaseConnected ? 'Supabase Connected' : 'เชื่อมต่อ Supabase'}</span>
               <span className={`w-2 h-2 rounded-full ${isSupabaseConnected ? 'bg-emerald-500 animate-pulse' : 'bg-amber-400'}`} />
             </button>
 
@@ -105,56 +111,45 @@ export function Header({
               className="h-12 px-4 rounded-lg border border-[#1565C0]/30 bg-[#1565C0]/5 hover:bg-[#1565C0]/10 active:bg-[#1565C0]/15 text-[#1565C0] font-medium text-sm flex items-center space-x-2 touch-press transition-colors"
             >
               <Scale className="w-5 h-5 text-[#1565C0]" />
-              <span className="hidden sm:inline">ชั่งตัดภาชนะ (Tare Deduct)</span>
+              <span className="hidden sm:inline">ชั่งตัดภาชนะ (Tare)</span>
               <span className="sm:hidden">ชั่งตัดน้ำหนัก</span>
             </button>
 
-            {/* Add New Ingredient Button */}
+            {/* Add New Button */}
             <button
               onClick={onAddNew}
               className="h-12 px-5 rounded-lg bg-[#2D2B2A] hover:bg-[#1f1e1d] active:bg-[#151414] text-white font-medium text-sm flex items-center space-x-2 shadow-sm touch-press transition-colors"
             >
               <Plus className="w-5 h-5 text-[#D4A373]" />
-              <span>เพิ่มวัตถุดิบใหม่</span>
+              <span>{activeTab === 'supplies' ? 'เพิ่มพัสดุ/อุปกรณ์' : 'เพิ่มสินค้า/เมนู'}</span>
             </button>
           </div>
         </div>
 
-        {/* Future Module Navigation Bar */}
+        {/* Supabase Real Tables Navigation Bar */}
         <div className="flex items-center space-x-1 border-t border-slate-100 overflow-x-auto py-1.5 no-scrollbar text-xs font-medium">
-          <button className="flex items-center space-x-1.5 px-3 py-1.5 rounded-md bg-[#2D2B2A] text-white font-semibold">
-            <Layers className="w-3.5 h-3.5 text-[#D4A373]" />
-            <span>คลังวัตถุดิบ (Inventory)</span>
-          </button>
-          
           <button 
-            disabled 
-            className="flex items-center space-x-1.5 px-3 py-1.5 rounded-md text-slate-400 hover:text-slate-600 cursor-not-allowed opacity-60"
-            title="โมดูลสูตรและเมนู (ขยายระบบในเฟสถัดไป)"
+            onClick={() => onTabChange('supplies')}
+            className={`flex items-center space-x-1.5 px-3 py-1.5 rounded-md transition-colors ${
+              activeTab === 'supplies'
+                ? 'bg-[#2D2B2A] text-white font-semibold'
+                : 'text-slate-600 hover:bg-slate-100'
+            }`}
           >
-            <Coffee className="w-3.5 h-3.5" />
-            <span>สูตรชง & เมนู (Recipes)</span>
-            <span className="text-[10px] bg-slate-100 px-1.5 py-0.2 rounded text-slate-500">เร็วๆ นี้</span>
+            <Layers className={`w-3.5 h-3.5 ${activeTab === 'supplies' ? 'text-[#D4A373]' : 'text-slate-500'}`} />
+            <span>พัสดุ & บรรจุภัณฑ์ (ตาราง supplies)</span>
           </button>
 
           <button 
-            disabled 
-            className="flex items-center space-x-1.5 px-3 py-1.5 rounded-md text-slate-400 hover:text-slate-600 cursor-not-allowed opacity-60"
-            title="โมดูลจุดขายหน้าร้าน (ขยายระบบในเฟสถัดไป)"
+            onClick={() => onTabChange('stock')}
+            className={`flex items-center space-x-1.5 px-3 py-1.5 rounded-md transition-colors ${
+              activeTab === 'stock'
+                ? 'bg-[#2D2B2A] text-white font-semibold'
+                : 'text-slate-600 hover:bg-slate-100'
+            }`}
           >
-            <ShoppingBag className="w-3.5 h-3.5" />
-            <span>ขายหน้าร้าน (Cashier POS)</span>
-            <span className="text-[10px] bg-slate-100 px-1.5 py-0.2 rounded text-slate-500">เร็วๆ นี้</span>
-          </button>
-
-          <button 
-            disabled 
-            className="flex items-center space-x-1.5 px-3 py-1.5 rounded-md text-slate-400 hover:text-slate-600 cursor-not-allowed opacity-60"
-            title="รายงานสต็อกและต้นทุน (ขยายระบบในเฟสถัดไป)"
-          >
-            <BarChart3 className="w-3.5 h-3.5" />
-            <span>รายงาน & ต้นทุน (Reports)</span>
-            <span className="text-[10px] bg-slate-100 px-1.5 py-0.2 rounded text-slate-500">เร็วๆ นี้</span>
+            <ShoppingBag className={`w-3.5 h-3.5 ${activeTab === 'stock' ? 'text-[#D4A373]' : 'text-slate-500'}`} />
+            <span>สินค้า & เมนูหน้าร้าน (ตาราง stock)</span>
           </button>
 
           {totalLowStock > 0 && (

@@ -70,17 +70,17 @@ NEXT_PUBLIC_SUPABASE_ANON_KEY="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."`;
                 <span>สร้างตารางใน Supabase (SQL Editor)</span>
               </span>
               <a 
-                href="https://supabase.com/dashboard" 
+                href="https://supabase.com/dashboard/project/fbffythkfzykzrgzpvfx/sql" 
                 target="_blank" 
                 rel="noreferrer"
                 className="text-xs text-emerald-700 font-semibold hover:underline flex items-center space-x-1"
               >
-                <span>เปิด Supabase</span>
+                <span>เปิด SQL Editor ของคุณ</span>
                 <ExternalLink className="w-3 h-3" />
               </a>
             </div>
             <p className="text-xs text-slate-600">
-              ไปที่เมนู <strong>SQL Editor</strong> ใน Supabase Dashboard แล้ววางโค้ดจากไฟล์ <code className="bg-slate-200 px-1.5 py-0.5 rounded text-slate-800">supabase/schema.sql</code> ซึ่งเตรียมตาราง <code className="bg-slate-200 px-1 py-0.5 rounded">ingredients</code>, RLS Policies และ Seed ข้อมูล 18 รายการไว้ให้เรียบร้อยแล้ว
+              ไปที่เมนู <strong>SQL Editor</strong> ใน Supabase Dashboard แล้ววางโค้ดจากไฟล์ <code className="bg-slate-200 px-1.5 py-0.5 rounded text-slate-800">supabase/schema.sql</code> ซึ่งเตรียมตาราง <code className="bg-slate-200 px-1 py-0.5 rounded">ingredients</code> (พร้อมฟิลด์ Tare Weight สำหรับตัดน้ำหนักภาชนะ, Barcode, หมวดหมู่กาแฟ), RLS Policies และ Seed ข้อมูล 18 รายการไว้พร้อมใช้งาน
             </p>
           </div>
 
@@ -89,7 +89,7 @@ NEXT_PUBLIC_SUPABASE_ANON_KEY="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."`;
             <div className="flex items-center justify-between">
               <span className="font-bold text-slate-800 flex items-center space-x-1.5">
                 <span className="w-5 h-5 rounded-full bg-slate-800 text-white text-xs flex items-center justify-center font-bold">2</span>
-                <span>นำ URL และ Anon Key มาใส่ในไฟล์ .env</span>
+                <span>ตรวจสอบไฟล์ .env</span>
               </span>
               <button
                 onClick={() => copyToClipboard(envSample, 'env')}
@@ -100,18 +100,15 @@ NEXT_PUBLIC_SUPABASE_ANON_KEY="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."`;
               </button>
             </div>
             
-            <pre className="p-3 bg-slate-900 text-emerald-400 rounded-lg text-xs font-mono overflow-x-auto">
-              {envSample}
-            </pre>
-            <p className="text-[11px] text-slate-500">
-              * คัดลอกจาก <strong>Project Settings &rarr; API</strong> ใน Supabase Dashboard
+            <p className="text-xs text-slate-600">
+              ไฟล์ <code className="bg-slate-200 px-1 py-0.5 rounded">.env</code> ในโปรเจกต์ได้รับการกำหนดค่า URL และ Anon Key ของ Supabase พร้อมใช้งานแล้ว
             </p>
           </div>
 
           {/* System status info */}
           <div className="p-3.5 rounded-lg bg-emerald-50 border border-emerald-200 text-xs text-emerald-900 space-y-1">
             <div className="font-bold">ระบบรองรับการสลับแบบอัตโนมัติ (Zero Downtime)</div>
-            <div>ทันทีที่กรอกค่า Supabase ใน <code className="font-mono font-semibold">.env</code> และรีสตาร์ท Dev Server ระบบจะเชื่อมต่อไปยัง Cloud Database ของคุณทันทีครับ</div>
+            <div>เมื่อรัน SQL สคริปต์ใน Supabase แล้ว ข้อมูลสต็อกจะซิงค์และบันทึกลง Cloud Database โดยตรงแบบ Real-time ทันทีครับ</div>
           </div>
 
         </div>
